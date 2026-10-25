@@ -4,7 +4,6 @@ use crate::{Box, Vec};
 
 use crate::{
     consts::{
-        HOST_DEFAULT_MAXIMUM_PACKET_SIZE, HOST_DEFAULT_MAXIMUM_WAITING_DATA,
         PROTOCOL_MAXIMUM_CHANNEL_COUNT, PROTOCOL_MAXIMUM_MTU, PROTOCOL_MAXIMUM_PEER_ID,
         PROTOCOL_MINIMUM_MTU,
     },
@@ -44,13 +43,6 @@ pub struct HostSettings {
     pub time: Box<dyn Fn() -> Duration>,
     /// Seed the host with a specific random seed, or set to [`None`] to use a random seed.
     pub seed: Option<u32>,
-    /// Largest packet, in bytes, the host sends or accepts (including the total length declared
-    /// by the first fragment of a fragmented packet). Cannot be 0. Defaults to ENet's 32 MiB.
-    pub maximum_packet_size: usize,
-    /// Most bytes of received packets a peer may have waiting (out of order or not yet
-    /// dispatched) before further incoming data is discarded. Cannot be 0. Defaults to ENet's
-    /// 32 MiB.
-    pub maximum_waiting_data: usize,
 }
 
 impl Default for HostSettings {
@@ -64,8 +56,6 @@ impl Default for HostSettings {
             checksum: None,
             time: Box::new(time_since_epoch),
             seed: None,
-            maximum_packet_size: HOST_DEFAULT_MAXIMUM_PACKET_SIZE as usize,
-            maximum_waiting_data: HOST_DEFAULT_MAXIMUM_WAITING_DATA as usize,
         }
     }
 }
@@ -95,8 +85,6 @@ impl<S: Socket> Host<S> {
     /// - If [`HostSettings::outgoing_bandwidth_limit`] is equal to `Some(0)`.
     /// - If [`HostSettings::peer_limit`] is equal to `0` or greater than
     ///   [`PROTOCOL_MAXIMUM_PEER_ID`].
-    /// - If [`HostSettings::maximum_packet_size`] or [`HostSettings::maximum_waiting_data`] is
-    ///   equal to `0`.
     ///
     /// Returns [`HostNewError::FailedToInitializeSocket`] if the call to [`Socket::init`] fails.
     pub fn new(socket: S, settings: HostSettings) -> Result<Host<S>, HostNewError<S>> {
@@ -124,18 +112,6 @@ impl<S: Socket> Host<S> {
                 parameter: "settings.peer_limit",
             }));
         }
-        if settings.maximum_packet_size == 0 {
-            return Err(HostNewError::BadParameter(BadParameter {
-                method: "Host::new",
-                parameter: "settings.maximum_packet_size",
-            }));
-        }
-        if settings.maximum_waiting_data == 0 {
-            return Err(HostNewError::BadParameter(BadParameter {
-                method: "Host::new",
-                parameter: "settings.maximum_waiting_data",
-            }));
-        }
         unsafe {
             let host = enet_host_create::<S>(
                 socket,
@@ -147,8 +123,6 @@ impl<S: Socket> Host<S> {
                 settings.seed,
             )
             .map_err(|err| HostNewError::FailedToInitializeSocket(err))?;
-            (*host).maximum_packet_size = settings.maximum_packet_size;
-            (*host).maximum_waiting_data = settings.maximum_waiting_data;
             let mut peers = Vec::new();
             peers.reserve_exact((*host).peer_count);
             for peer_index in 0..(*host).peer_count {
@@ -440,6 +414,63 @@ impl<S: Socket> Host<S> {
         }
         unsafe {
             (*self.host).mtu = mtu as u32;
+        }
+        Ok(())
+    }
+
+    /// Largest packet, in bytes, the host sends or accepts (including the total length declared
+    /// by the first fragment of a fragmented packet). Defaults to ENet's 32 MiB.
+    #[must_use]
+    pub fn maximum_packet_size(&self) -> usize {
+        unsafe { (*self.host).maximum_packet_size }
+    }
+
+    /// Set the largest packet size, in bytes. Cannot be 0. See [`Host::maximum_packet_size`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BadParameter`] if `maximum_packet_size` is `0`.
+    pub fn set_maximum_packet_size(
+        &mut self,
+        maximum_packet_size: usize,
+    ) -> Result<(), BadParameter> {
+        if maximum_packet_size == 0 {
+            return Err(BadParameter {
+                method: "Host::set_maximum_packet_size",
+                parameter: "maximum_packet_size",
+            });
+        }
+        unsafe {
+            (*self.host).maximum_packet_size = maximum_packet_size;
+        }
+        Ok(())
+    }
+
+    /// Most bytes of received packets a peer may have waiting (out of order or not yet
+    /// dispatched) before further incoming data is discarded. Defaults to ENet's 32 MiB.
+    #[must_use]
+    pub fn maximum_waiting_data(&self) -> usize {
+        unsafe { (*self.host).maximum_waiting_data }
+    }
+
+    /// Set the most bytes of received packets a peer may have waiting. Cannot be 0. See
+    /// [`Host::maximum_waiting_data`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BadParameter`] if `maximum_waiting_data` is `0`.
+    pub fn set_maximum_waiting_data(
+        &mut self,
+        maximum_waiting_data: usize,
+    ) -> Result<(), BadParameter> {
+        if maximum_waiting_data == 0 {
+            return Err(BadParameter {
+                method: "Host::set_maximum_waiting_data",
+                parameter: "maximum_waiting_data",
+            });
+        }
+        unsafe {
+            (*self.host).maximum_waiting_data = maximum_waiting_data;
         }
         Ok(())
     }
